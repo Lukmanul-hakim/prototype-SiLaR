@@ -1,9 +1,8 @@
-# src/segment.py
 import cv2
 import numpy as np
 
 # ======================================================
-# PARAMETER FINAL (SUDAH SEIMBANG)
+# PARAMETER
 # ======================================================
 START_TH = 0.025
 END_TH = 0.012
@@ -11,15 +10,15 @@ END_TH = 0.012
 OBSERVE_FRAMES = 12
 
 MIN_FRAMES = 20
-MAX_FRAMES = 400        # gesture panjang aman
+MAX_FRAMES = 400
 
-STATIC_HOLD_FRAMES = 40     # statis ~1.3 detik
-POST_MOTION_HOLD = 30       # dinamis: harus BENAR-BENAR berhenti
+STATIC_HOLD_FRAMES = 40
+POST_MOTION_HOLD = 30
 
 STABLE_WINDOW = 20
-STABLE_RATIO = 0.75
-
 MIN_HAND_AREA = 0.02
+
+MAX_MISSING_FRAMES = 5   # ⬅ toleransi landmark hilang (penting untuk Z)
 
 PALM_IDX = [0, 5, 9, 13, 17]
 
@@ -75,23 +74,12 @@ def draw_keypoints(frame, lm):
     if np.any(lm[21:]):
         draw_hand(frame, lm[21:], (255,0,0))
 
-def draw_ui(frame, state, label_text, stable_ratio=None):
+def draw_ui(frame, state, label_text):
     cv2.putText(frame, f"STATE: {state}", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
-
-    if stable_ratio is not None:
-        cv2.putText(frame, f"STABLE_RATIO: {stable_ratio:.2f}",
-                    (10, 65),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
-
     cv2.putText(frame, f"LABEL: {label_text}",
                 (10, frame.shape[0]-20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-
-    cv2.putText(frame,
-                "Masukkan tangan | Gerakan = dinamis | Tahan = statis | ENTER = simpan | ESC = keluar",
-                (10, frame.shape[0]-50),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200,200,200), 1)
 
 def keyboard_input(key, current):
     if 65 <= key <= 90 or 97 <= key <= 122:
@@ -101,7 +89,7 @@ def keyboard_input(key, current):
     return current
 
 # ======================================================
-# AUTO RECORD (FINAL)
+# AUTO RECORD (TRAJECTORY FIXED)
 # ======================================================
 def auto_record(cam, extractor, label_state):
     state = "WAIT"
@@ -111,35 +99,34 @@ def auto_record(cam, extractor, label_state):
 
     static_hold = 0
     post_motion_hold = 0
-    stable_window = []
-
     has_motion = False
+
     prev_lm = None
+    missing_frames = 0
 
     while True:
         frame, _ = cam.read()
         if frame is None:
             return None
 
-        lm = extractor(frame)
-        motion = motion_score(prev_lm, lm)
-        prev_lm = lm
+        lm_raw = extractor(frame)
+        motion = motion_score(prev_lm, lm_raw)
 
-        disp = frame.copy()
-
-        if valid_hand(lm):
-            draw_keypoints(disp, lm)
+        # ===== HANDLE LANDMARK HILANG =====
+        if valid_hand(lm_raw):
+            lm = lm_raw
+            missing_frames = 0
         else:
-            lm = None
+            missing_frames += 1
+            if missing_frames <= MAX_MISSING_FRAMES:
+                lm = prev_lm
+            else:
+                lm = None
 
-        # ================= UI (SELALU DIGAMBAR) =================
-        draw_ui(
-            disp,
-            state,
-            label_state["text"],
-            stable_ratio=None if state != "RECORD"
-            else sum(stable_window)/max(1,len(stable_window))
-        )
+        prev_lm = lm
+        disp = frame.copy()
+        draw_keypoints(disp, lm)
+        draw_ui(disp, state, label_state["text"])
 
         # ================= LOGIC =================
         if state == "WAIT":
@@ -155,17 +142,22 @@ def auto_record(cam, extractor, label_state):
                 if motion > START_TH:
                     state = "RECORD"
                     buffer.clear()
+
+                    # ⬅⬅⬅ INI KUNCI: AMBIL FRAME AWAL GERAK
+                    buffer.append(prev_lm)
+                    buffer.append(lm)
+
                     has_motion = True
                     static_hold = 0
                     post_motion_hold = 0
-                    stable_window.clear()
+
                 elif observe_counter >= OBSERVE_FRAMES:
                     state = "RECORD"
                     buffer.clear()
+                    buffer.append(lm)
                     has_motion = False
                     static_hold = 0
                     post_motion_hold = 0
-                    stable_window.clear()
 
         elif state == "RECORD":
             if lm is None:
@@ -183,13 +175,16 @@ def auto_record(cam, extractor, label_state):
                 if has_motion:
                     post_motion_hold += 1
 
-            stable_window.append(motion < END_TH)
-            if len(stable_window) > STABLE_WINDOW:
-                stable_window.pop(0)
-
-            # === SAVE ===
+            # ===== SAVE RULE =====
             if has_motion:
                 if post_motion_hold >= POST_MOTION_HOLD and len(buffer) >= MIN_FRAMES:
+                    # ⬅ CEK ADA MOTION NYATA
+                    motions = [
+                        motion_score(buffer[i-1], buffer[i])
+                        for i in range(1, len(buffer))
+                    ]
+                    if np.max(motions) < START_TH:
+                        continue  # TOLAK: ini pose statis
                     return buffer
             else:
                 if static_hold >= STATIC_HOLD_FRAMES and len(buffer) >= MIN_FRAMES:
