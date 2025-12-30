@@ -1,32 +1,26 @@
-# --- Python cache ---
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
+*.pyo
+*.pyd
+*.log
 
-# --- Virtual environments ---
+# Virtual env
 venv/
-.env/
 .venv/
 
-# --- Jupyter Notebook checkpoints ---
-.ipynb_checkpoints/
+# VSCode
+.vscode/
 
-# --- OS / Editor junk ---
+# OS
 .DS_Store
 Thumbs.db
 
-# --- VS Code ---
-.vscode/
+# Data/model besar (pilih sesuai kebutuhan)
+data/models/*.joblib
+data/prototypes/**/*.npy
 
-# --- Logs and temp files ---
-*.log
-*.tmp
-*.bak
-
-# --- Environment files ---
-.env
-*.env
-
-# --- Data (optional, see note below) ---
-# If your dataset is large or private, uncomment the next line:
-# spotify_churn_dataset.csv
+# Build artifacts
+*.egg-info/
+dist/
+build/
