@@ -1,0 +1,6 @@
+numpy>=1.23,<2.0
+scipy>=1.9
+joblib>=1.2
+opencv-python>=4.7
+mediapipe>=0.10
+fastdtw>=0.3.4
